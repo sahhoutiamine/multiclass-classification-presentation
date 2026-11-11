@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modèles multiclasses : du split à l’interprétation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Instrument+Sans:wght@400;600&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0e1726;--sf:#16233a;--ln:#243756;--tx:#e8eef7;--mu:#8fa3bf;--a:#4fd1c5;--b:#f6c453;--c:#ff6b81;--v:#8b7cf6}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--tx);font:clamp(14px,1.4vw,19px)/1.5 "Instrument Sans",system-ui,sans-serif}
+h1,h2,h3{font-family:"Bricolage Grotesque",system-ui,sans-serif;line-height:1.1;letter-spacing:-.02em}
+h1{font-size:clamp(2.4rem,6.5vw,5.6rem);font-weight:800}
+h2{font-size:clamp(1.7rem,3.6vw,3rem);font-weight:800}
+h3{font-size:1.15em;font-weight:600;margin-bottom:.35em}
+.mu{color:var(--mu)}.lead{font-size:1.3em;color:var(--mu);max-width:34em}
+b{font-weight:600}
+#bg{position:fixed;inset:0;opacity:.7;z-index:0}
+#bar{position:fixed;top:0;left:0;height:4px;width:0;background:linear-gradient(90deg,var(--a),var(--b),var(--c));z-index:9;transition:width .6s}
+.slide{position:absolute;inset:0;z-index:1;display:flex;flex-direction:column;justify-content:center;gap:2vh;padding:5vh 7vw 10vh;overflow-y:auto;opacity:0;visibility:hidden;transform:scale(.97);transition:opacity .5s,transform .5s,visibility .5s}
+.slide.active{opacity:1;visibility:visible;transform:none}
+@keyframes rise{from{opacity:0;transform:translateY(24px)}}
+.active .r{animation:rise .7s cubic-bezier(.2,.7,.2,1) both;animation-delay:calc(var(--i,0)*80ms + 150ms)}
+.ic{width:1.4em;height:1.4em;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-.28em;flex:none}
+.big{width:3.4em;height:3.4em;color:var(--a)}
+.g{display:grid;gap:1.6vh 1.5vw;align-items:start}.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g5{grid-template-columns:repeat(5,1fr)}
+.cd{background:var(--sf);border:1px solid var(--ln);border-radius:14px;padding:1em 1.15em}
+.cd .ic{color:var(--a)}
+.chips{display:flex;flex-wrap:wrap;gap:.5em}
+.chips span{background:var(--sf);border:1px solid var(--ln);border-radius:99px;padding:.15em .8em;font-size:.85em}
+.dot{display:inline-block;width:.7em;height:.7em;border-radius:50%;background:currentColor;margin-right:.45em}
+pre.code{background:#0a1220;border:1px solid var(--ln);border-radius:10px;padding:1em;font:.66em/1.6 "JetBrains Mono",monospace;overflow:auto;white-space:pre;color:#cdd9ea}
+.k{color:var(--v)}.s{color:var(--b)}.cm{color:#5d7391}.f{color:var(--a)}
+.warn{border-left:4px solid var(--c)}.ok{border-left:4px solid var(--a)}
+.small{font-size:.85em}
+/* roadmap */
+.flow{display:flex;gap:.5vw;margin-top:2vh}
+.nd{position:relative;flex:1;text-align:center;font-weight:600}
+.bub{width:4.2em;height:4.2em;margin:0 auto .5em;border-radius:50%;display:grid;place-items:center;background:var(--sf);border:1px solid var(--ln);color:var(--a)}
+.active .bub{animation:pulse 2.8s infinite calc(var(--i)*.35s)}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(79,209,197,.45)}70%,100%{box-shadow:0 0 0 16px rgba(79,209,197,0)}}
+.nd:not(:last-child)::after{content:"";position:absolute;top:2.1em;left:calc(50% + 2.6em);right:calc(-50% + 2.6em);height:2px;background:linear-gradient(90deg,var(--ln) 0 40%,var(--a) 50%,var(--ln) 60% 100%) 0 0/300% 100%;animation:fl 2.4s linear infinite}
+@keyframes fl{to{background-position:-300% 0}}
+/* split */
+.sbar{display:flex;height:4.2em;border-radius:12px;overflow:hidden;border:1px solid var(--ln)}
+.seg{width:0;display:grid;place-items:center;color:#0e1726;font-weight:600;white-space:nowrap;transition:width 1.4s cubic-bezier(.2,.7,.2,1) .5s}
+.seg:nth-child(2){transition-delay:.9s}.seg:nth-child(3){transition-delay:1.3s}
+.active .seg{width:var(--w)}
+.role{border-left:4px solid;padding:.2em .9em}
+/* multiclass */
+.sb{display:grid;grid-template-columns:5em 1fr 2.6em;gap:.6em;align-items:center;margin:.3em 0}
+.tr{height:.9em;background:#0a1220;border-radius:9px;overflow:hidden}
+.tr i{display:block;height:100%;width:0;border-radius:9px;transition:width 1.2s cubic-bezier(.2,.7,.2,1) calc(.6s + var(--d,0)*.12s)}
+.active .tr i{width:var(--w)}
+input[type=range]{width:100%;accent-color:var(--a)}
+/* matrix */
+.mx{display:grid;grid-template-columns:auto repeat(3,1fr);gap:6px;align-items:center;text-align:center}
+.cell{padding:.9em 0;border-radius:8px;font:600 1.1em "JetBrains Mono",monospace;transition:opacity .3s}
+.cell.off{opacity:.2}.ch,.rh{font-size:.85em}.rh{text-align:right;padding-right:.4em}
+.btn{background:var(--sf);color:var(--tx);border:1px solid var(--ln);border-radius:99px;padding:.3em 1em;font:inherit;cursor:pointer;transition:.2s}
+.btn:hover{border-color:var(--a)}.btn.on{background:var(--a);color:#0e1726;border-color:var(--a)}
+.nums{display:flex;gap:1em;margin-top:.8em}.nums div{flex:1;text-align:center}.nums b{display:block;font:800 1.9em "Bricolage Grotesque",sans-serif;color:var(--a)}
+/* cv */
+.cvr{display:flex;align-items:center;gap:.8em;margin:.35em 0}.cvr b{width:4.5em;font-size:.85em}
+.cells{display:flex;gap:4px;flex:1}.cells i{flex:1;height:1.6em;border-radius:4px;opacity:.22;transition:.3s}
+.cells i.v{opacity:1;transform:scaleY(1.3);box-shadow:0 0 14px currentColor}
+/* nav */
+#nav{position:fixed;right:3vw;bottom:2.5vh;z-index:9;display:flex;gap:.6em;align-items:center;color:var(--mu);font-size:.85em}
+#nav button{width:2.6em;height:2.6em;border-radius:50%;border:1px solid var(--ln);background:var(--sf);color:var(--tx);cursor:pointer;display:grid;place-items:center}
+#nav button:hover,.btn:focus-visible,#nav button:focus-visible{border-color:var(--a);outline:2px solid var(--a)}
+@media(max-width:800px){.g2,.g3,.g5{grid-template-columns:1fr}.flow{flex-wrap:wrap}.nd{flex:0 0 33%;margin-bottom:1em}.nd::after{display:none}}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="i-split" viewBox="0 0 24 24"><path d="M16 3h5v5M4 20 21 3M21 16v5h-5M15 15l6 6M4 4l5 5"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7zM2 12l10 5 10-5M2 17l10 5 10-5"/></symbol>
+<symbol id="i-tree" viewBox="0 0 24 24"><path d="M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6M18 9a9 9 0 0 1-9 9"/></symbol>
+<symbol id="i-chart" viewBox="0 0 24 24"><path d="M3 3v18h18M8 17v-5M13 17V7M18 17v-9"/></symbol>
+<symbol id="i-save" viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8"/></symbol>
+<symbol id="i-grid" viewBox="0 0 24 24"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></symbol>
+<symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4M3 11v-1a4 4 0 0 1 4-4h14M7 22l-4-4 4-4M21 13v1a4 4 0 0 1-4 4H3"/></symbol>
+<symbol id="i-cpu" viewBox="0 0 24 24"><path d="M4 4h16v16H4zM9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></symbol>
+<symbol id="i-prev" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="i-next" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+</defs></svg>
+<canvas id="bg"></canvas><div id="bar"></div>
+
+<!-- 1 Titre -->
+<section class="slide active">
+  <svg class="ic big r"><use href="#i-layers"/></svg>
+  <h1 class="r">Modèles multiclasses</h1>
+  <p class="lead r">Du split Train / Validation / Test jusqu’à l’interprétation des résultats</p>
+  <div class="chips r"><span style="color:var(--a)"><i class="dot"></i>Risque faible</span><span style="color:var(--b)"><i class="dot"></i>Risque modéré</span><span style="color:var(--c)"><i class="dot"></i>Risque élevé</span></div>
+  <p class="mu r small">Guide pour le projet « bien-être et risque de santé mentale étudiant ». Chaque couleur est une classe : les points de même classe se regroupent, c’est ce que le modèle apprend.</p>
+</section>
+
+<!-- 2 Feuille de route -->
+<section class="slide">
+  <h2 class="r">La chaîne que nous allons parcourir</h2>
+  <p class="lead r">Sept étapes, dans cet ordre, pour entraîner un modèle fiable.</p>
+  <div class="flow">
+    <div class="nd r"><div class="bub"><svg class="ic"><use href="#i-split"/></svg></div>Split</div>
+    <div class="nd r"><div class="bub"><svg class="ic"><use href="#i-layers"/></svg></div>Multiclasse</div>
+    <div class="nd r"><div class="bub"><svg class="ic"><use href="#i-cpu"/></svg></div>Modèles</div>
+    <div class="nd r"><div class="bub"><svg class="ic"><use href="#i-target"/></svg></div>Métriques</div>
+    <div class="nd r"><div class="bub"><svg class="ic"><use href="#i-repeat"/></svg></div>Validation croisée</div>
+    <div class="nd r"><div class="bub"><svg class="ic"><use href="#i-save"/></svg></div>Sauvegarde</div>
+    <div class="nd r"><div class="bub"><svg class="ic"><use href="#i-chart"/></svg></div>Interprétation</div>
+  </div>
+</section>
+
+<!-- 3 Split -->
+<section class="slide">
+  <h2 class="r">1. Séparer les données</h2>
+  <div class="sbar r"><div class="seg" style="--w:64%;background:var(--a)">Train 64 %</div><div class="seg" style="--w:16%;background:var(--b)">Val 16 %</div><div class="seg" style="--w:20%;background:var(--c)">Test 20 %</div></div>
+  <div class="g g2">
+    <div>
+      <div class="role r" style="border-color:var(--a)"><b>Train</b> : le modèle apprend ici.</div><br>
+      <div class="role r" style="border-color:var(--b)"><b>Validation</b> : comparer les modèles et régler les hyperparamètres.</div><br>
+      <div class="role r" style="border-color:var(--c)"><b>Test</b> : note finale, utilisé une seule fois.</div><br>
+      <div class="cd warn r small"><svg class="ic" style="color:var(--c)"><use href="#i-alert"/></svg> <b>stratify=y</b> garde les proportions de classes dans chaque ensemble. Avec la validation croisée, le bloc Validation est remplacé par les folds.</div>
+    </div>
+    <pre class="code r">from sklearn.model_selection import train_test_split
+
+# 1) on met 20 % de côté pour le test final
+X_tmp, X_test, y_tmp, y_test = train_test_split(
+    X, y, test_size=0.20, stratify=y, random_state=42)
+
+# 2) on coupe le reste en Train / Validation
+X_train, X_val, y_train, y_val = train_test_split(
+    X_tmp, y_tmp, test_size=0.20, stratify=y_tmp,
+    random_state=42)</pre>
+  </div>
+</section>
+
+<!-- 4 Multiclasse -->
+<section class="slide">
+  <h2 class="r">2. Classer plus de deux classes</h2>
+  <div class="g g3">
+    <div class="cd r"><h3>OvR : un contre le reste</h3><p class="small mu">k classifieurs. Chacun isole une classe de toutes les autres, le plus grand score gagne.</p><br><div class="chips"><span>Faible vs reste</span><span>Modéré vs reste</span><span>Élevé vs reste</span></div><p class="small mu"><br>OneVsRestClassifier</p></div>
+    <div class="cd r"><h3>OvO : un contre un</h3><p class="small mu">k(k−1)/2 classifieurs, un par paire de classes. Prédiction par vote majoritaire.</p><br><div class="chips"><span>Faible vs Modéré</span><span>Faible vs Élevé</span><span>Modéré vs Élevé</span></div><p class="small mu"><br>OneVsOneClassifier, SVC par défaut</p></div>
+    <div class="cd r"><h3>Softmax : un seul modèle</h3><p class="small mu">Il produit une probabilité par classe, leur somme vaut 1.</p>
+      <div class="sb"><span style="color:var(--a)">Faible</span><div class="tr"><i style="--w:62%;background:var(--a)"></i></div><b>.62</b></div>
+      <div class="sb"><span style="color:var(--b)">Modéré</span><div class="tr"><i style="--w:27%;--d:1;background:var(--b)"></i></div><b>.27</b></div>
+      <div class="sb"><span style="color:var(--c)">Élevé</span><div class="tr"><i style="--w:11%;--d:2;background:var(--c)"></i></div><b>.11</b></div>
+      <p class="small mu">LogisticRegression (multinomial)</p></div>
+  </div>
+  <div class="cd r"><b>Combien de modèles pour k classes ?</b> k = <b id="kv">3</b>
+    <input type="range" id="k" min="2" max="10" value="3" aria-label="Nombre de classes k">
+    OvR : <b id="o1" style="color:var(--a)">3</b> modèles &nbsp;·&nbsp; OvO : <b id="o2" style="color:var(--c)">3</b> modèles</div>
+</section>
+
+<!-- 5 Modèles -->
+<section class="slide">
+  <h2 class="r">3. Cinq modèles, un même protocole</h2>
+  <div class="g g5" id="models"></div>
+  <p class="mu r small">Même split, même pipeline de prétraitement, mêmes métriques : seule la dernière étape change.</p>
+</section>
+
+<!-- 6 Pipeline -->
+<section class="slide">
+  <h2 class="r">Entraîner sans data leakage</h2>
+  <div class="g g2">
+    <pre class="code r">from imblearn.pipeline import Pipeline
+from imblearn.over_sampling import SMOTE
+
+pre = ColumnTransformer([
+ ("num", Pipeline([("imp", SimpleImputer(strategy="median")),
+                   ("sc", StandardScaler())]), num_cols),
+ ("cat", Pipeline([("imp", SimpleImputer(strategy="most_frequent")),
+                   ("oh", OneHotEncoder(handle_unknown="ignore"))]),
+  cat_cols)])
+
+models = {"LogReg": LogisticRegression(max_iter=1000),
+          "Tree": DecisionTreeClassifier(max_depth=5),
+          "RF": RandomForestClassifier(n_estimators=300),
+          "KNN": KNeighborsClassifier(),
+          "SVM": SVC(probability=True)}
+
+for name, clf in models.items():
+    pipe = Pipeline([("pre", pre), ("smote", SMOTE(random_state=42)),
+                     ("clf", clf)])
+    pipe.fit(X_train, y_train)
+    pred = pipe.predict(X_val)
+    print(name, f1_score(y_val, pred, average="macro"))</pre>
+    <div>
+      <div class="cd ok r"><svg class="ic"><use href="#i-shield"/></svg> <b>Tout est dans le pipeline</b>
+        <p class="small mu">Imputation, standardisation et encodage sont appris sur le train seulement, puis appliqués tels quels à la validation et au test.</p></div><br>
+      <div class="cd warn r"><svg class="ic" style="color:var(--c)"><use href="#i-alert"/></svg> <b>SMOTE uniquement sur le train</b>
+        <p class="small mu">Avec le Pipeline d’imblearn, le sur-échantillonnage ne s’exécute qu’au fit, jamais sur la validation ni le test.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 7 Métriques -->
+<section class="slide">
+  <h2 class="r">4. Mesurer la qualité</h2>
+  <div class="g g2">
+    <div>
+      <div class="g g2">
+        <div class="cd r"><h3>Accuracy</h3><p class="small mu">Bonnes prédictions / total. Trompeuse si les classes sont déséquilibrées.</p></div>
+        <div class="cd r"><h3>Precision</h3><p class="small mu">TP / (TP + FP). Quand je prédis cette classe, ai-je raison ?</p></div>
+        <div class="cd r"><h3>Recall</h3><p class="small mu">TP / (TP + FN). Combien de vrais cas ai-je retrouvés ?</p></div>
+        <div class="cd r"><h3>F1-score</h3><p class="small mu">Moyenne harmonique de precision et recall.</p></div>
+      </div><br>
+      <p class="small mu r"><b>average="macro"</b> traite les classes à égalité, <b>"weighted"</b> pondère par leur effectif. Pour des classes déséquilibrées, regardez le macro-F1.</p>
+    </div>
+    <div class="cd r">
+      <p class="small mu">Cliquez une classe. Lignes = réel, colonnes = prédit.</p>
+      <div class="chips" id="sel" style="margin:.5em 0"></div>
+      <div id="m1"></div>
+      <div class="nums" id="out"></div>
+    </div>
+  </div>
+</section>
+
+<!-- 8 CV -->
+<section class="slide">
+  <h2 class="r">5. Validation croisée et réglage</h2>
+  <div class="g g2">
+    <div class="cd r">
+      <div class="chips" style="margin-bottom:.6em"><button class="btn on" id="b1">K-Fold</button><button class="btn" id="b2">Stratified K-Fold</button></div>
+      <div id="cvEl"></div>
+      <p class="small mu" id="cvT" style="margin-top:.6em"></p>
+    </div>
+    <pre class="code r">cv = StratifiedKFold(n_splits=5, shuffle=True,
+                     random_state=42)
+
+scores = cross_val_score(pipe, X_train, y_train,
+                         cv=cv, scoring="f1_macro")
+print(scores.mean(), scores.std())
+
+grid = GridSearchCV(
+    pipe,
+    {"clf__n_estimators": [200, 400],
+     "clf__max_depth": [None, 10, 20]},
+    cv=cv, scoring="f1_macro", n_jobs=-1)
+grid.fit(X_train, y_train)
+print(grid.best_params_, grid.best_score_)
+
+# test final : une seule fois
+best = grid.best_estimator_
+best.score(X_test, y_test)</pre>
+  </div>
+</section>
+
+<!-- 9 Sauvegarde -->
+<section class="slide">
+  <h2 class="r">6. Sauvegarder et recharger</h2>
+  <div class="g g2">
+    <div class="cd r"><h3><svg class="ic"><use href="#i-save"/></svg> Joblib</h3><p class="small mu">Recommandé par scikit-learn : efficace pour les gros tableaux NumPy (forêts, KNN).</p><br>
+<pre class="code">import joblib
+joblib.dump(best, "pipeline.joblib")
+pipe = joblib.load("pipeline.joblib")
+pipe.predict(new_df)</pre></div>
+    <div class="cd r"><h3><svg class="ic"><use href="#i-save"/></svg> Pickle</h3><p class="small mu">Module standard de Python, fonctionne pour tout objet.</p><br>
+<pre class="code">import pickle
+with open("pipeline.pkl", "wb") as f:
+    pickle.dump(best, f)
+with open("pipeline.pkl", "rb") as f:
+    pipe = pickle.load(f)</pre></div>
+  </div>
+  <div class="g g3">
+    <div class="cd ok r small"><b>Sauvegardez le pipeline complet</b>, pas seulement le modèle : l’app Streamlit pourra prédire sur des données brutes.</div>
+    <div class="cd warn r small"><b>Ne chargez jamais un fichier inconnu</b> : pickle peut exécuter du code.</div>
+    <div class="cd warn r small"><b>Gardez les mêmes versions</b> de scikit-learn et Python au chargement.</div>
+  </div>
+</section>
+
+<!-- 10 Matrice -->
+<section class="slide">
+  <h2 class="r">7. Lire la matrice de confusion</h2>
+  <div class="g g2">
+    <div class="cd r">
+      <div class="chips" style="margin-bottom:.6em"><button class="btn on" id="n1">Effectifs</button><button class="btn" id="n2">Normalisée par ligne</button></div>
+      <div id="m2"></div>
+    </div>
+    <div>
+      <pre class="code r">y_pred = best.predict(X_test)
+
+ConfusionMatrixDisplay.from_predictions(
+    y_test, y_pred, normalize="true", cmap="Blues")
+
+print(classification_report(y_test, y_pred))</pre><br>
+      <div class="cd ok r small"><b>Diagonale</b> : prédictions justes. <b>Hors diagonale</b> : erreurs, ici Modéré prédit Élevé (9 cas) et Élevé prédit Modéré (6 cas).</div><br>
+      <div class="cd warn r small"><b>Erreur la plus grave</b> : un risque élevé prédit faible. Surveillez le recall de la classe « Élevé ».</div>
+    </div>
+  </div>
+</section>
+
+<!-- 11 Feature importance -->
+<section class="slide">
+  <h2 class="r">8. Quelles variables comptent ?</h2>
+  <div class="g g2">
+    <div class="cd r"><p class="small mu">Exemple illustratif (Random Forest)</p><div id="fi"></div></div>
+    <div>
+      <pre class="code r">rf = best.named_steps["clf"]
+names = best.named_steps["pre"].get_feature_names_out()
+imp = pd.Series(rf.feature_importances_, index=names)
+imp.sort_values().tail(10).plot.barh()
+
+# plus fiable, sur le jeu de test :
+from sklearn.inspection import permutation_importance
+r = permutation_importance(best, X_test, y_test,
+        scoring="f1_macro", n_repeats=10, random_state=42)</pre><br>
+      <div class="cd warn r small"><svg class="ic" style="color:var(--c)"><use href="#i-alert"/></svg> Importance n’est pas causalité : une variable liée au risque ne le provoque pas forcément.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 12 Checklist -->
+<section class="slide">
+  <h2 class="r">Checklist pour votre projet</h2>
+  <div class="g g2" id="ck"></div>
+  <div class="cd warn r"><svg class="ic" style="color:var(--c)"><use href="#i-shield"/></svg> <b>Projet strictement pédagogique.</b> Le modèle n’est jamais un outil de diagnostic, de dépistage clinique, de décision disciplinaire ni de sélection d’étudiants.</div>
+</section>
+
+<!-- 13 Fin -->
+<section class="slide">
+  <svg class="ic big r"><use href="#i-check"/></svg>
+  <h1 class="r">Merci !</h1>
+  <p class="lead r">Des questions ?</p>
+  <div class="chips r"><span>Split</span><span>Multiclasse</span><span>Modèles</span><span>Métriques</span><span>Validation croisée</span><span>Sauvegarde</span><span>Interprétation</span></div>
+</section>
+
+<div id="nav"><span id="cnt"></span><button id="pv" aria-label="Précédent"><svg class="ic"><use href="#i-prev"/></svg></button><button id="nx" aria-label="Suivant"><svg class="ic"><use href="#i-next"/></svg></button></div>
+
+<script>
+const $=id=>document.getElementById(id),rm=matchMedia('(prefers-reduced-motion:reduce)').matches;
+const C=['Faible','Modéré','Élevé'],col=['var(--a)','var(--b)','var(--c)'],M=[[48,5,1],[7,38,9],[1,6,35]];
+const ic=n=>`<svg class="ic"><use href="#i-${n}"/></svg>`;
+
+/* Fond : points de même classe reliés */
+const cv=$('bg'),cx=cv.getContext('2d'),cc=['79,209,197','246,196,83','255,107,129'];let W,H;
+const rs=()=>{W=cv.width=innerWidth;H=cv.height=innerHeight};rs();addEventListener('resize',rs);
+const P=Array.from({length:70},(_,i)=>({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.35,vy:(Math.random()-.5)*.35,k:i%3}));
+(function f(){cx.clearRect(0,0,W,H);P.forEach((p,i)=>{p.x=(p.x+p.vx+W)%W;p.y=(p.y+p.vy+H)%H;cx.fillStyle=`rgba(${cc[p.k]},.6)`;cx.beginPath();cx.arc(p.x,p.y,2.6,0,7);cx.fill();
+for(let j=i+1;j<P.length;j++){const q=P[j];if(q.k!=p.k)continue;const d=Math.hypot(p.x-q.x,p.y-q.y);if(d<150){cx.strokeStyle=`rgba(${cc[p.k]},${(1-d/150)*.25})`;cx.beginPath();cx.moveTo(p.x,p.y);cx.lineTo(q.x,q.y);cx.stroke()}}});
+if(!rm)requestAnimationFrame(f)})();
+
+/* Coloration du code */
+document.querySelectorAll('pre.code').forEach(p=>{p.innerHTML=p.textContent.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/(#.*$)|("[^"]*")|\b(import|from|as|for|in|with|print)\b|\b([A-Za-z_]\w*)(?=\()/gm,(m,c,s,k,f)=>c?`<span class=cm>${c}</span>`:s?`<span class=s>${s}</span>`:k?`<span class=k>${k}</span>`:`<span class=f>${f}</span>`)});
+
+/* Modèles */
+const MD=[['chart','Logistic Regression','Softmax natif','Scaling : oui','Rapide, coefficients lisibles','Relations linéaires seulement'],
+['tree','Decision Tree','Multiclasse natif','Scaling : non','Règles faciles à expliquer','Surapprend : limiter max_depth'],
+['layers','Random Forest','Multiclasse natif','Scaling : non','Robuste, donne les importances','Plus lent, moins lisible'],
+['target','KNN','Multiclasse natif','Scaling : oui','Aucun entraînement','Lent en prédiction, sensible aux échelles'],
+['cpu','SVM','OvO par défaut','Scaling : oui','Efficace avec le noyau RBF','Régler C et gamma']];
+$('models').innerHTML=MD.map(m=>`<div class="cd r">${ic(m[0])}<h3>${m[1]}</h3><p class="small"><b style="color:var(--a)">${m[2]}</b><br>${m[3]}</p><p class="small mu"><br>+ ${m[4]}<br>− ${m[5]}</p></div>`).join('');
+
+/* Calculateur OvR / OvO */
+$('k').oninput=e=>{const k=+e.target.value;$('kv').textContent=k;$('o1').textContent=k;$('o2').textContent=k*(k-1)/2};
+
+/* Matrice de confusion */
+function mat(el,norm,s){const rs=M.map(r=>r.reduce((a,b)=>a+b));
+let h='<div class="mx"><span></span>'+C.map((c,j)=>`<b class="ch" style="color:${col[j]}">Prédit ${c}</b>`).join('');
+M.forEach((r,i)=>{h+=`<b class="rh" style="color:${col[i]}">Réel ${C[i]}</b>`;
+r.forEach((v,j)=>{const p=v/rs[i],on=s==null||s==i||s==j;
+h+=`<div class="cell r${on?'':' off'}" style="--i:${i*3+j};background:${i==j?'rgba(79,209,197,'+(.15+p*.7).toFixed(2):'rgba(255,107,129,'+Math.min(.6,p*2.5).toFixed(2)})">${norm?Math.round(p*100)+'%':v}</div>`})});
+el.innerHTML=h+'</div>'}
+function pick(i){const tot=M.flat().reduce((a,b)=>a+b),acc=M.reduce((a,r,k)=>a+r[k],0)/tot;
+const st=C.map((_,k)=>{const tp=M[k][k],fn=M[k].reduce((a,b)=>a+b)-tp,fp=M.reduce((a,r)=>a+r[k],0)-tp,P=tp/(tp+fp),R=tp/(tp+fn);return[P,R,2*P*R/(P+R)]});
+const v=i==null?[0,1,2].map(x=>st.reduce((a,s)=>a+s[x],0)/3):st[i];
+document.querySelectorAll('#sel .btn').forEach((b,k)=>b.classList.toggle('on',k-1==(i==null?-1:i)));
+$('out').innerHTML=[['Accuracy',acc],[i==null?'Precision macro':'Precision',v[0]],[i==null?'Recall macro':'Recall',v[1]],[i==null?'F1 macro':'F1',v[2]]].map(x=>`<div><b>${x[1].toFixed(2)}</b><span class="small mu">${x[0]}</span></div>`).join('');
+mat($('m1'),false,i)}
+$('sel').innerHTML=['Toutes'].concat(C).map((c,k)=>`<button class="btn">${c}</button>`).join('');
+document.querySelectorAll('#sel .btn').forEach((b,k)=>b.onclick=()=>pick(k?k-1:null));pick(null);
+mat($('m2'),false);
+[['n1',false],['n2',true]].forEach(([id,n])=>$(id).onclick=()=>{mat($('m2'),n);$('n1').classList.toggle('on',!n);$('n2').classList.toggle('on',n)});
+
+/* Validation croisée */
+function cvr(st){let h='';for(let k=0;k<5;k++){h+=`<div class="cvr r" style="--i:${k}"><b>Fold ${k+1}</b><div class="cells">`;
+for(let c=0;c<20;c++){const cl=c<10?0:c<15?1:2,v=st?(cl==0?c>>1==k:cl==1?c-10==k:c-15==k):c>>2==k;
+h+=`<i class="${v?'v':''}" style="background:${col[cl]};color:${col[cl]}"></i>`}h+='</div></div>'}
+$('cvEl').innerHTML=h+'<p class="small mu">Cases brillantes = validation, cases ternes = entraînement.</p>';
+$('cvT').innerHTML=st?'<b style="color:var(--a)">Stratified :</b> chaque fold garde les proportions 50 / 25 / 25. Les scores sont comparables.':'<b style="color:var(--c)">K-Fold sur données triées :</b> le fold 1 ne contient que « Faible », le fold 5 que « Élevé ». Évaluation faussée. Mélangez (shuffle) ou stratifiez.';
+$('b1').classList.toggle('on',!st);$('b2').classList.toggle('on',st)}
+$('b1').onclick=()=>cvr(false);$('b2').onclick=()=>cvr(true);cvr(false);
+
+/* Feature importance */
+$('fi').innerHTML=[['Qualité du sommeil',.24],['Stress académique',.19],['Soutien social',.14],['Heures d’étude',.11],['Activité physique',.09],['Score d’anxiété',.08],['Âge',.04]]
+.map((f,i)=>`<div class="sb r" style="grid-template-columns:9em 1fr 2.6em"><span class="small">${f[0]}</span><div class="tr"><i style="--w:${f[1]/.24*100}%;--d:${i};background:linear-gradient(90deg,var(--v),var(--a))"></i></div><b class="small">${f[1].toFixed(2)}</b></div>`).join('');
+
+/* Checklist */
+$('ck').innerHTML=['Split stratifié, test mis de côté','Prétraitement dans un Pipeline','SMOTE sur le train uniquement','Même split pour tous les modèles','Macro-F1 et matrice de confusion','Validation croisée stratifiée sur le train','Test utilisé une seule fois','Pipeline complet sauvegardé','Erreurs et limites analysées','Importances lues sans conclure à la causalité']
+.map(t=>`<div class="cd ok r">${ic('check')} ${t}</div>`).join('');
+
+/* Navigation */
+const S=[...document.querySelectorAll('.slide')];let n=0;
+function go(i){i=Math.max(0,Math.min(S.length-1,i));S[n].classList.remove('active');n=i;S[n].classList.add('active');
+S[n].querySelectorAll('.r').forEach((e,k)=>e.style.setProperty('--i',k));
+$('bar').style.width=n/(S.length-1)*100+'%';$('cnt').textContent=(n+1)+' / '+S.length}
+$('pv').onclick=()=>go(n-1);$('nx').onclick=()=>go(n+1);
+addEventListener('keydown',e=>{if(['ArrowRight','PageDown',' '].includes(e.key)){e.preventDefault();go(n+1)}
+else if(['ArrowLeft','PageUp'].includes(e.key))go(n-1);else if(e.key=='Home')go(0);else if(e.key=='End')go(S.length-1);
+else if(e.key=='f')document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen()});
+let tx=0;addEventListener('touchstart',e=>tx=e.touches[0].clientX);
+addEventListener('touchend',e=>{const d=e.changedTouches[0].clientX-tx;if(Math.abs(d)>60)go(n+(d<0?1:-1))});
+go(0);
+</script>
+</body>
+</html>
